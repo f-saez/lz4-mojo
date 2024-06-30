@@ -3,7 +3,7 @@ import sys.ffi
 from memory.unsafe_pointer import UnsafePointer
 from random import randint
 from testing.testing import assert_true
-
+from collections import Optional
 
 alias LZ4_versionNumber = fn() -> UInt32
 alias LZ4_compress_default = fn(UnsafePointer[UInt8], UnsafePointer[UInt8], Int, Int) -> Int
@@ -18,6 +18,7 @@ alias LZ4HC_CLEVEL_MAX     = 12
 
 alias LIBNAME = "liblz4.so"
 
+@value
 struct LZ4Version(Stringable):
     var major: UInt32
     var minor: UInt32
@@ -31,23 +32,26 @@ struct LZ4Version(Stringable):
     fn __str__(self) -> String:
         return String(self.major)+"."+String(self.minor)+"."+String(self.version)
     
-
+@value
 struct LZ4:
     var _handle : ffi.DLHandle
-    var _good   : Bool
 
     fn __init__(inout self):
         self._handle = ffi.DLHandle(LIBNAME, ffi.RTLD.NOW)
-        self._good = self._handle.__bool__()
-        if not self._good:
+
+    @staticmethod
+    fn new() -> Optional[Self]:
+        var result = Optional[Self](None)
+        var handle = ffi.DLHandle(LIBNAME, ffi.RTLD.NOW)
+        if handle.__bool__():
+            result = Optional[Self]( Self(handle) )
+        else:
             print("Unable to load ",LIBNAME)
+        return result
 
     fn version(self) -> LZ4Version:
-        if self._good:
-            var num = self._handle.get_function[LZ4_versionNumber]("LZ4_versionNumber")()
-            return LZ4Version(num)
-        else:            
-            return LZ4Version(0)
+        var num = self._handle.get_function[LZ4_versionNumber]("LZ4_versionNumber")()
+        return LZ4Version(num)
 
     fn compress_bound(self, input_size : Int) -> Int:
         """
@@ -58,10 +62,7 @@ struct LZ4:
             inputSize  : max supported value is LZ4_MAX_INPUT_SIZE
             return : maximum output size in a "worst case" scenario or 0, if input size is incorrect (too large or negative).
         """
-        if self._good:
-            return self._handle.get_function[LZ4_compressBound]("LZ4_compressBound")(input_size)
-        else:            
-            return 0
+        return self._handle.get_function[LZ4_compressBound]("LZ4_compressBound")(input_size)
     
     @always_inline
     fn min_comp_level(self) -> Int:
@@ -85,11 +86,10 @@ struct LZ4:
         compression stops *immediately*, and the function result is False.
         In which case, 'dst' content is undefined (invalid).
         """        
-        if self._good:
-            var l = self._handle.get_function[LZ4_compress_default]("LZ4_compress_default")(src.unsafe_ptr(), dst.unsafe_ptr(), src.size, dst.size)
-            if l>0:
-                dst.resize(l)
-        return self._good
+        var l = self._handle.get_function[LZ4_compress_default]("LZ4_compress_default")(src.unsafe_ptr(), dst.unsafe_ptr(), src.size, dst.size)
+        if l>0:
+            dst.resize(l)
+        return l>0
         
     fn compress_hc(self, src : List[UInt8], inout dst : List[UInt8], compression_level: Int) -> Int:
         """ 
@@ -102,17 +102,14 @@ struct LZ4:
                                 Values > LZ4HC_CLEVEL_MAX behave the same as LZ4HC_CLEVEL_MAX.
             @return : the number of bytes written into 'dst' or 0 if compression fails.
         """   
-        var l = 0     
-        if self._good:
-            var cl:Int
-            if compression_level<LZ4HC_CLEVEL_MIN:
-                cl = LZ4HC_CLEVEL_MIN
-            elif compression_level>LZ4HC_CLEVEL_MAX:
-                cl = LZ4HC_CLEVEL_MAX
-            else:
-                cl = compression_level
-            l = self._handle.get_function[LZ4_compress_HC]("LZ4_compress_HC")(src.unsafe_ptr(), dst.unsafe_ptr(), src.size, dst.size, cl)
-        return l
+        var cl:Int
+        if compression_level<LZ4HC_CLEVEL_MIN:
+            cl = LZ4HC_CLEVEL_MIN
+        elif compression_level>LZ4HC_CLEVEL_MAX:
+            cl = LZ4HC_CLEVEL_MAX
+        else:
+            cl = compression_level
+        return self._handle.get_function[LZ4_compress_HC]("LZ4_compress_HC")(src.unsafe_ptr(), dst.unsafe_ptr(), src.size, dst.size, cl)
 
     fn decompress_safe(self, src : List[UInt8], inout dst : List[UInt8], uncompressed_size : Int) -> Bool:
         """ 
@@ -121,10 +118,8 @@ struct LZ4:
             uncompressed_size : exact size of the decompressed data
             @return : False if something went wrong during decompression.
         """        
-        var l = -1
-        if self._good:
-            dst.resize(uncompressed_size, 0)
-            l = self._handle.get_function[LZ4_decompress_safe]("LZ4_decompress_safe")(src.unsafe_ptr(), dst.unsafe_ptr(), src.size, dst.size)
+        dst.resize(uncompressed_size, 0)
+        var l = self._handle.get_function[LZ4_decompress_safe]("LZ4_decompress_safe")(src.unsafe_ptr(), dst.unsafe_ptr(), src.size, dst.size)
         return l==uncompressed_size      
     
     @staticmethod
@@ -190,7 +185,8 @@ struct LZ4:
         assert_true(result,"decompress noise / size error")
         assert_true(compare_list(original,uncompress),"result is not the same as source")
                       
-
+fn main() raises :
+    LZ4.validation()
     
 
     
