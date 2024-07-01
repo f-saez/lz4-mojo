@@ -36,8 +36,8 @@ struct LZ4Version(Stringable):
 struct LZ4:
     var _handle : ffi.DLHandle
 
-    fn __init__(inout self):
-        self._handle = ffi.DLHandle(LIBNAME, ffi.RTLD.NOW)
+    fn __init__(inout self, owned handle : ffi.DLHandle):
+        self._handle = handle
 
     @staticmethod
     fn new() -> Optional[Self]:
@@ -136,7 +136,9 @@ struct LZ4:
 
         var original = List[UInt8]()
         original.resize(16384,0)
-        var lz4 = LZ4()
+        var aa = LZ4.new()
+        assert_true(aa)
+        var lz4 = aa.take()
         var recommended_size = lz4.compress_bound(original.size)
         assert_true(recommended_size>original.size,"error while calling compress_bound")
 
